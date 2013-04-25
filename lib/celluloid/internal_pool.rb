@@ -10,6 +10,10 @@ module Celluloid
       @mutex = Mutex.new
       @busy_size = @idle_size = 0
 
+      reset
+    end
+
+    def reset
       # TODO: should really adjust this based on usage
       @max_idle = 16
     end
@@ -38,7 +42,7 @@ module Celluloid
         if @pool.size >= @max_idle
           thread[:celluloid_queue] << nil
         else
-          clean_thread_locals(thread)
+          thread.recycle
           @pool << thread
           @idle_size += 1
           @busy_size -= 1
@@ -65,13 +69,12 @@ module Celluloid
       thread
     end
 
-    # Clean the thread locals of an incoming thread
-    def clean_thread_locals(thread)
-      thread.keys.each do |key|
-        next if key == :celluloid_queue
-
-        # Ruby seems to lack an API for deleting thread locals. WTF, Ruby?
-        thread[key] = nil
+    def shutdown
+      @mutex.synchronize do
+        @max_idle = 0
+        @pool.each do |thread|
+          thread[:celluloid_queue] << nil
+        end
       end
     end
   end

@@ -25,6 +25,11 @@ module Celluloid
       !!Thread.current[:celluloid_actor]
     end
 
+    # Retrieve the mailbox for the current thread or lazily initialize it
+    def mailbox
+      Thread.current[:celluloid_mailbox] ||= Celluloid::Mailbox.new
+    end
+
     # Generate a Universally Unique Identifier
     def uuid
       UUID.generate
@@ -61,13 +66,33 @@ module Celluloid
     # Launch default services
     # FIXME: We should set up the supervision hierarchy here
     def boot
+      internal_pool.reset
       Celluloid::Notifications::Fanout.supervise_as :notifications_fanout
       Celluloid::IncidentReporter.supervise_as :default_incident_reporter, STDERR
+    end
+
+    def register_shutdown
+      return if @shutdown_registered
+      # Terminate all actors at exit
+      at_exit do
+        if defined?(RUBY_ENGINE) && RUBY_ENGINE == "ruby" && RUBY_VERSION >= "1.9"
+          # workaround for MRI bug losing exit status in at_exit block
+          # http://bugs.ruby-lang.org/issues/5218
+          exit_status = $!.status if $!.is_a?(SystemExit)
+          Celluloid.shutdown
+          exit exit_status if exit_status
+        else
+          Celluloid.shutdown
+        end
+      end
+      @shutdown_registered = true
     end
 
     # Shut down all running actors
     def shutdown
       Timeout.timeout(shutdown_timeout) do
+        internal_pool.shutdown
+
         actors = Actor.all
         Logger.debug "Terminating #{actors.size} actors..." if actors.size > 0
 
@@ -75,14 +100,14 @@ module Celluloid
         Supervisor.root.terminate if Supervisor.root
 
         # Actors cannot self-terminate, you must do it for them
-        Actor.all.each do |actor|
+        actors.each do |actor|
           begin
             actor.terminate!
           rescue DeadActorError, MailboxError
           end
         end
 
-        Actor.all.each do |actor|
+        actors.each do |actor|
           begin
             Actor.join(actor)
           rescue DeadActorError, MailboxError
@@ -91,7 +116,7 @@ module Celluloid
 
         Logger.debug "Shutdown completed cleanly"
       end
-    rescue Timeout::Error => ex
+    rescue Timeout::Error
       Logger.error("Couldn't cleanly terminate all actors in #{shutdown_timeout} seconds!")
     end
   end
@@ -174,13 +199,9 @@ module Celluloid
     # Define the mailbox class for this class
     def mailbox_class(klass = nil)
       if klass
-        @mailbox_class = klass
-      elsif defined?(@mailbox_class)
-        @mailbox_class
-      elsif superclass.respond_to? :mailbox_class
-        superclass.mailbox_class
+        mailbox.class = klass
       else
-        Celluloid::Mailbox
+        mailbox.class
       end
     end
     
@@ -213,7 +234,7 @@ module Celluloid
     def exclusive(*methods)
       if methods.empty?
         @exclusive_methods = :all
-      elsif @exclusive_methods != :all
+      elsif !defined?(@exclusive_methods) || @exclusive_methods != :all
         @exclusive_methods ||= Set.new
         @exclusive_methods.merge methods.map(&:to_sym)
       end
@@ -221,24 +242,52 @@ module Celluloid
 
     # Mark methods as running blocks on the receiver
     def execute_block_on_receiver(*methods)
-      @receiver_block_executions ||= Set.new
-      @receiver_block_executions.merge methods.map(&:to_sym)
+      receiver_block_executions.merge methods.map(&:to_sym)
+    end
+
+    def receiver_block_executions
+      @receiver_block_executions ||= Set.new([:after, :every, :receive])
     end
 
     # Configuration options for Actor#new
     def actor_options
       {
-        :mailbox           => mailbox_class.new,
+        :mailbox           => mailbox.build,
         :proxy_class       => proxy_class,
         :task_class        => task_class,
         :exit_handler      => exit_handler,
         :exclusive_methods => defined?(@exclusive_methods) ? @exclusive_methods : nil,
-        :receiver_block_executions => defined?(@receiver_block_executions) ? @receiver_block_executions : [:initialize, :after, :every, :receive]
+        :receiver_block_executions => receiver_block_executions
       }
     end
 
     def ===(other)
       other.kind_of? self
+    end
+
+    def mailbox
+      @mailbox_factory ||= MailboxFactory.new(self)
+    end
+
+    class MailboxFactory
+      attr_accessor :class, :max_size
+
+      def initialize(actor)
+        @actor    = actor
+        @class    = nil
+        @max_size = nil
+      end
+
+      def build
+        mailbox = mailbox_class.new
+        mailbox.max_size = @max_size
+        mailbox
+      end
+
+      private
+      def mailbox_class
+        @class || (@actor.superclass.respond_to?(:mailbox_class) && @actor.superclass.mailbox_class) || Celluloid::Mailbox
+      end
     end
   end
 
@@ -264,6 +313,16 @@ module Celluloid
     # Are we being invoked in a different thread from our owner?
     def leaked?
       @celluloid_owner != Thread.current[:celluloid_actor]
+    end
+
+    def tap
+      yield current_actor
+      current_actor
+    end
+
+    # Obtain the name of the current actor
+    def name
+      Actor.name
     end
 
     def inspect
@@ -327,11 +386,6 @@ module Celluloid
     Thread.current[:celluloid_chain_id]
   end
 
-  # Obtain the name of the current actor
-  def name
-    Actor.name
-  end
-
   # Obtain the running tasks for this actor
   def tasks
     Thread.current[:celluloid_actor].tasks.to_a
@@ -378,7 +432,7 @@ module Celluloid
     if actor
       actor.receive(timeout, &block)
     else
-      Thread.mailbox.receive(timeout, &block)
+      Celluloid.mailbox.receive(timeout, &block)
     end
   end
 
@@ -432,17 +486,13 @@ module Celluloid
   def future(meth = nil, *args, &block)
     Thread.current[:celluloid_actor].proxy.future meth, *args, &block
   end
-
-  def tap
-    yield current_actor
-    current_actor
-  end
 end
 
 require 'celluloid/version'
 
 require 'celluloid/calls'
 require 'celluloid/condition'
+require 'celluloid/thread'
 require 'celluloid/core_ext'
 require 'celluloid/cpu_counter'
 require 'celluloid/fiber'
@@ -451,6 +501,7 @@ require 'celluloid/internal_pool'
 require 'celluloid/links'
 require 'celluloid/logger'
 require 'celluloid/mailbox'
+require 'celluloid/evented_mailbox'
 require 'celluloid/method'
 require 'celluloid/receivers'
 require 'celluloid/registry'
@@ -483,3 +534,4 @@ require 'celluloid/legacy' unless defined?(CELLULOID_FUTURE)
 Celluloid.task_class = Celluloid::TaskFiber
 Celluloid.logger     = Logger.new(STDERR)
 Celluloid.shutdown_timeout = 10
+Celluloid.register_shutdown

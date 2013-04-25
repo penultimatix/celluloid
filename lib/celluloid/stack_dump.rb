@@ -1,7 +1,7 @@
 module Celluloid
   class StackDump
 
-    class TaskState < Struct.new(:task_class, :status)
+    class TaskState < Struct.new(:task_class, :status, :backtrace)
     end
 
     class ActorState
@@ -24,8 +24,9 @@ module Celluloid
 
     def snapshot
       Thread.list.each do |thread|
-        if actor = thread[:celluloid_actor]
-          @actors << snapshot_actor(actor)
+        if thread.celluloid?
+          next if thread.task
+          @actors << snapshot_actor(thread.actor) if thread.actor
         else
           @threads << snapshot_thread(thread)
         end
@@ -42,7 +43,7 @@ module Celluloid
         state.status = :idle
       else
         state.status = :running
-        state.tasks = tasks.collect { |t| TaskState.new(t.class, t.status) }
+        state.tasks = tasks.collect { |t| TaskState.new(t.class, t.status, t.backtrace) }
       end
 
       state.backtrace = actor.thread.backtrace if actor.thread
@@ -62,16 +63,18 @@ module Celluloid
 
         if actor.status == :idle
           string << "State: Idle (waiting for messages)\n"
+          display_backtrace actor.backtrace, string
         else
           string << "State: Running (executing tasks)\n"
+          display_backtrace actor.backtrace, string
           string << "Tasks:\n"
 
           actor.tasks.each_with_index do |task, i|
             string << "  #{i+1}) #{task.task_class}: #{task.status}\n"
+            display_backtrace task.backtrace, string
           end
         end
 
-        display_backtrace actor.backtrace, string
         output.print string
       end
 

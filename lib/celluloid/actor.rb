@@ -27,7 +27,7 @@ module Celluloid
   # normal Ruby objects wrapped in threads which communicate with asynchronous
   # messages.
   class Actor
-    attr_reader :subject, :proxy, :tasks, :links, :mailbox, :thread, :name
+    attr_reader :subject, :proxy, :tasks, :links, :mailbox, :thread, :name, :locals
 
     class << self
       extend Forwardable
@@ -78,8 +78,9 @@ module Celluloid
       def all
         actors = []
         Thread.list.each do |t|
-          actor = t[:celluloid_actor]
-          actors << actor.proxy if actor and actor.respond_to?(:proxy)
+          next unless t.celluloid?
+          next if t.task
+          actors << t.actor.proxy if t.actor && t.actor.respond_to?(:proxy)
         end
         actors
       end
@@ -128,8 +129,8 @@ module Celluloid
       end
 
       # Wait for an actor to terminate
-      def join(actor)
-        actor.thread.join
+      def join(actor, timeout = nil)
+        actor.thread.join(timeout)
         actor
       end
     end
@@ -151,15 +152,20 @@ module Celluloid
       @running   = true
       @exclusive = false
       @name      = nil
+      @locals    = {}
 
       @thread = ThreadHandle.new do
-        Thread.current[:celluloid_actor]   = self
-        Thread.current[:celluloid_mailbox] = @mailbox
+        setup_thread
         run
       end
 
       @proxy = (options[:proxy_class] || ActorProxy).new(self)
       @subject.instance_variable_set(OWNER_IVAR, self)
+    end
+
+    def setup_thread
+      Thread.current[:celluloid_actor]   = self
+      Thread.current[:celluloid_mailbox] = @mailbox
     end
 
     # Run the actor loop
@@ -311,8 +317,13 @@ module Celluloid
         handle_system_event message
       when Call
         task(:call, message.method) {
-          if @receiver_block_executions && (message.method && @receiver_block_executions.include?(message.method.to_sym))
-            message.execute_block_on_receiver
+          if @receiver_block_executions && meth = message.method
+            if meth == :__send__
+              meth = message.arguments.first
+            end
+            if @receiver_block_executions.include?(meth.to_sym)
+              message.execute_block_on_receiver
+            end
           end
           message.dispatch(@subject)
         }
