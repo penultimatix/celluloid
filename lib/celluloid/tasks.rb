@@ -1,13 +1,18 @@
 module Celluloid
   # Asked to do task-related things outside a task
-  class NotTaskError < StandardError; end
+  class NotTaskError < Celluloid::Error; end
 
   # Trying to resume a dead task
-  class DeadTaskError < StandardError; end
+  class DeadTaskError < Celluloid::Error; end
+
+  # Errors which should be resumed automatically
+  class ResumableError < Celluloid::Error; end
 
   # Tasks are interruptable/resumable execution contexts used to run methods
   class Task
-    class TerminatedError < StandardError; end # kill a running task
+    class TerminatedError < ResumableError; end # kill a running task after terminate
+
+    class TimeoutError < ResumableError; end # kill a running task after timeout
 
     # Obtain the current task
     def self.current
@@ -20,14 +25,16 @@ module Celluloid
     end
 
     attr_reader :type, :status
+    attr_accessor :chain_id, :name
 
     # Create a new task
     def initialize(type)
-      @type   = type
-      @status = :new
+      @type     = type
+      @name     = nil
+      @status   = :new
 
-      actor    = Thread.current[:celluloid_actor]
-      chain_id = Thread.current[:celluloid_chain_id]
+      actor     = Thread.current[:celluloid_actor]
+      @chain_id = CallChain.current_id
 
       raise NotActorError, "can't create tasks outside of actors" unless actor
 
@@ -35,8 +42,9 @@ module Celluloid
         begin
           @status = :running
           actor.setup_thread
-          Thread.current[:celluloid_task]     = self
-          Thread.current[:celluloid_chain_id] = chain_id
+
+          Thread.current[:celluloid_task] = self
+          CallChain.current_id = @chain_id
 
           actor.tasks << self
           yield
@@ -58,7 +66,7 @@ module Celluloid
       @status = status
       value = signal
 
-      raise value if value.is_a?(Task::TerminatedError)
+      raise value if value.is_a?(Celluloid::ResumableError)
       @status = :running
 
       value
@@ -72,7 +80,12 @@ module Celluloid
 
     # Terminate this task
     def terminate
-      resume Task::TerminatedError.new("task was terminated") if running?
+      if running?
+        Celluloid.logger.warn "Terminating task: type=#{@type.inspect}, status=#{@status.inspect}"
+        resume Task::TerminatedError.new("task was terminated")
+      else
+        raise DeadTaskError, "task is already dead"
+      end
     end
 
     def backtrace
@@ -86,30 +99,30 @@ module Celluloid
       "#<#{self.class}:0x#{object_id.to_s(16)} @type=#{@type.inspect}, @status=#{@status.inspect}>"
     end
   end
-  
+
   class TaskSet
     include Enumerable
-  
+
     def initialize
       @tasks = Set.new
     end
-  
+
     def <<(task)
       @tasks += [task]
     end
-  
+
     def delete(task)
       @tasks -= [task]
     end
-  
+
     def each(&blk)
       @tasks.each(&blk)
     end
-  
+
     def first
       @tasks.first
     end
-    
+
     def empty?
       @tasks.empty?
     end

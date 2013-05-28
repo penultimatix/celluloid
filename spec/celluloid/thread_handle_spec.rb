@@ -15,4 +15,8 @@ describe Celluloid::ThreadHandle do
   it "joins to thread handles" do
     Celluloid::ThreadHandle.new { sleep 0.01 }.join
   end
+
+  it "supports passing a role" do
+    Celluloid::ThreadHandle.new(:useful) { Thread.current.role.should == :useful }.join
+  end
 end

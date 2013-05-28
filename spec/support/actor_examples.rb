@@ -91,6 +91,36 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
     ponycopter.greet_by_proxy(actor).should eq("Hi, I'm a ponycopter!")
   end
 
+  it "detects recursion" do
+    klass1 = Class.new do
+      include included_module
+      task_class task_klass
+
+      def recursion_test(recurse_through = nil)
+        if recurse_through
+          recurse_through.recursion_thunk(Celluloid::Actor.current)
+        else
+          Celluloid.detect_recursion
+        end
+      end
+    end
+
+    klass2 = Class.new do
+      include included_module
+      task_class task_klass
+
+      def recursion_thunk(other)
+        other.recursion_test
+      end
+    end
+
+    actor1 = klass1.new
+    actor2 = klass2.new
+
+    actor1.recursion_test.should be_false
+    actor1.recursion_test(actor2).should be_true
+  end
+
   it "properly handles method_missing" do
     actor = actor_class.new "Method Missing"
     actor.should respond_to(:first)
@@ -160,6 +190,27 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
     actor.inspect.should match(/Celluloid::ActorProxy\(/)
     actor.inspect.should match(/#{actor_class}/)
     actor.inspect.should include('dead')
+  end
+
+  it "supports recursive inspect with other actors" do
+    klass = Class.new do
+      include included_module
+      task_class task_klass
+
+      attr_accessor :other
+
+      def initialize(other = nil)
+        @other = other
+      end
+    end
+
+    itchy = klass.new
+    scratchy = klass.new(itchy)
+    itchy.other = scratchy
+
+    inspection = itchy.inspect
+    inspection.should match(/Celluloid::ActorProxy\(/)
+    inspection.should include("...")
   end
 
   it "allows access to the wrapped object" do
@@ -283,6 +334,14 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
       actor.should_not be_alive
     end
 
+    it "can be terminated by a SyncCall" do
+      actor = actor_class.new "Arnold Schwarzenegger"
+      actor.should be_alive
+      actor.shutdown
+      Celluloid::Actor.join(actor)
+      actor.should_not be_alive
+    end
+
     it "kills" do # THOU SHALT ALWAYS KILL
       actor = actor_class.new "Woody Harrelson"
       actor.should be_alive
@@ -307,6 +366,17 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
       expect do
         actor.terminate!
       end.to raise_exception(Celluloid::DeadActorError, "actor already terminated")
+    end
+
+    it "logs a warning when terminating tasks" do
+      Celluloid.logger = mock.as_null_object
+      Celluloid.logger.should_receive(:warn).with("Terminating task: type=:call, status=:sleeping")
+
+      actor = actor_class.new "Arnold Schwarzenegger"
+      actor.async.sleepy 10
+      actor.greet # make sure the actor has started sleeping
+
+      actor.terminate
     end
   end
 
@@ -336,6 +406,12 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
         def value
           Thread.current[:example_thread_local]
         end
+
+        def deferred_value
+          defer do
+            Thread.current[:example_thread_local]
+          end
+        end
       end
     end
 
@@ -344,6 +420,11 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
     it "preserves thread locals between tasks" do
       actor = example_class.new(example_value)
       actor.value.should eq example_value
+    end
+
+    it "isolates thread locals in defer blocks" do
+      actor = example_class.new(example_value)
+      actor.deferred_value.should eq nil
     end
   end
 
@@ -462,18 +543,11 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
           raise "already signaled" if @signaled
 
           @waiting = true
-          signal :future
-
           value = wait :ponycopter
 
           @waiting = false
           @signaled = true
           value
-        end
-
-        def wait_for_future
-          return true if @waiting
-          wait :future
         end
 
         def send_signal(value)
@@ -491,9 +565,11 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
 
       obj.async.wait_for_signal
       obj.should_not be_signaled
+      obj.should be_waiting
 
       obj.send_signal :foobar
       obj.should be_signaled
+      obj.should_not be_waiting
     end
 
     it "sends values along with signals" do
@@ -502,7 +578,6 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
 
       future = obj.future(:wait_for_signal)
 
-      obj.wait_for_future
       obj.should be_waiting
       obj.should_not be_signaled
 
@@ -879,6 +954,37 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
     it "retains custom task classes when subclassed" do
       subclass = Class.new(subject)
       subclass.new.tasks.first.should be_a ExampleTask
+    end
+  end
+
+  context :timeouts do
+    let :actor_class do
+      Class.new do
+        include included_module
+
+        def name
+          sleep 0.5
+          :foo
+        end
+
+        def ask_name_with_timeout(other, duration)
+          timeout(duration) { other.name }
+        end
+      end
+    end
+
+    it "allows timing out tasks, raising Celluloid::Task::TimeoutError" do
+      a1 = actor_class.new
+      a2 = actor_class.new
+
+      expect { a1.ask_name_with_timeout a2, 0.3 }.to raise_error(Celluloid::Task::TimeoutError)
+    end
+
+    it "does not raise when it completes in time" do
+      a1 = actor_class.new
+      a2 = actor_class.new
+
+      a1.ask_name_with_timeout(a2, 0.6).should == :foo
     end
   end
 end

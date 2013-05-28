@@ -2,16 +2,16 @@ require 'timers'
 
 module Celluloid
   # Don't do Actor-like things outside Actor scope
-  class NotActorError < StandardError; end
+  class NotActorError < Celluloid::Error; end
 
   # Trying to do something to a dead actor
-  class DeadActorError < StandardError; end
+  class DeadActorError < Celluloid::Error; end
 
   # A timeout occured before the given request could complete
-  class TimeoutError < StandardError; end
+  class TimeoutError < Celluloid::Error; end
 
   # The sender made an error, not the current actor
-  class AbortError < StandardError
+  class AbortError < Celluloid::Error
     attr_reader :cause
 
     def initialize(cause)
@@ -78,8 +78,7 @@ module Celluloid
       def all
         actors = []
         Thread.list.each do |t|
-          next unless t.celluloid?
-          next if t.task
+          next unless t.celluloid? && t.role == :actor
           actors << t.actor.proxy if t.actor && t.actor.respond_to?(:proxy)
         end
         actors
@@ -122,10 +121,7 @@ module Celluloid
       # Forcibly kill a given actor
       def kill(actor)
         actor.thread.kill
-        begin
-          actor.mailbox.shutdown
-        rescue DeadActorError
-        end
+        actor.mailbox.shutdown
       end
 
       # Wait for an actor to terminate
@@ -154,7 +150,7 @@ module Celluloid
       @name      = nil
       @locals    = {}
 
-      @thread = ThreadHandle.new do
+      @thread = ThreadHandle.new(:actor) do
         setup_thread
         run
       end
@@ -247,7 +243,7 @@ module Celluloid
 
     # Send a signal with the given name to all waiting methods
     def signal(name, value = nil)
-      @signals.send name, value
+      @signals.broadcast name, value
     end
 
     # Wait for the given signal
@@ -347,7 +343,7 @@ module Celluloid
       when NamingRequest
         @name = event.name
       when TerminationRequest
-        @running = false
+        terminate
       when SignalConditionRequest
         event.call
       end
@@ -404,10 +400,8 @@ module Celluloid
     def cleanup(exit_event)
       @mailbox.shutdown
       @links.each do |actor|
-        begin
+        if actor.mailbox.alive?
           actor.mailbox << exit_event
-        rescue MailboxError
-          # We're exiting/crashing, they're dead. Give up :(
         end
       end
 

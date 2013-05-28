@@ -54,7 +54,7 @@ module Celluloid
   class SyncCall < Call
     attr_reader :sender, :task, :chain_id
 
-    def initialize(sender, method, arguments = [], block = nil, task = Thread.current[:celluloid_task], chain_id = Thread.current[:celluloid_chain_id])
+    def initialize(sender, method, arguments = [], block = nil, task = Thread.current[:celluloid_task], chain_id = CallChain.current_id)
       super(method, arguments, block)
 
       @sender   = sender
@@ -63,7 +63,7 @@ module Celluloid
     end
 
     def dispatch(obj)
-      Thread.current[:celluloid_chain_id] = @chain_id
+      CallChain.current_id = @chain_id
       result = super(obj)
       respond SuccessResponse.new(self, result)
     rescue Exception => ex
@@ -76,7 +76,7 @@ module Celluloid
       # Otherwise, it's a bug in this actor and should be reraised
       raise unless ex.is_a?(AbortError)
     ensure
-      Thread.current[:celluloid_chain_id] = nil
+      CallChain.current_id = nil
     end
 
     def cleanup
@@ -86,9 +86,6 @@ module Celluloid
 
     def respond(message)
       @sender << message
-    rescue MailboxError
-      # It's possible the sender exited or crashed before we could send a
-      # response to them.
     end
 
     def value
@@ -121,13 +118,13 @@ module Celluloid
   class AsyncCall < Call
 
     def dispatch(obj)
-      Thread.current[:celluloid_chain_id] = Celluloid.uuid
+      CallChain.current_id = Celluloid.uuid
       super(obj)
     rescue AbortError => ex
       # Swallow aborted async calls, as they indicate the sender made a mistake
       Logger.debug("#{obj.class}: async call `#@method` aborted!\n#{Logger.format_exception(ex.cause)}")
     ensure
-      Thread.current[:celluloid_chain_id] = nil
+      CallChain.current_id = nil
     end
 
   end

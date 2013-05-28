@@ -4,6 +4,8 @@ require 'timeout'
 require 'set'
 
 module Celluloid
+  Error = Class.new StandardError
+
   extend self # expose all instance methods as singleton methods
 
   # Warning message added to Celluloid objects accessed outside their actors
@@ -48,6 +50,18 @@ module Celluloid
     end
     alias_method :dump, :stack_dump
 
+    # Detect if a particular call is recursing through multiple actors
+    def detect_recursion
+      actor = Thread.current[:celluloid_actor]
+      return unless actor
+
+      task = Thread.current[:celluloid_task]
+      return unless task
+
+      chain_id = CallChain.current_id
+      actor.tasks.any? { |t| t != task && t.chain_id == chain_id }
+    end
+
     # Define an exception handler for actor crashes
     def exception_handler(&block)
       Logger.exception_handler(&block)
@@ -90,10 +104,11 @@ module Celluloid
 
     # Shut down all running actors
     def shutdown
+      actors = Actor.all
+
       Timeout.timeout(shutdown_timeout) do
         internal_pool.shutdown
 
-        actors = Actor.all
         Logger.debug "Terminating #{actors.size} actors..." if actors.size > 0
 
         # Attempt to shut down the supervision tree, if available
@@ -103,14 +118,14 @@ module Celluloid
         actors.each do |actor|
           begin
             actor.terminate!
-          rescue DeadActorError, MailboxError
+          rescue DeadActorError
           end
         end
 
         actors.each do |actor|
           begin
             Actor.join(actor)
-          rescue DeadActorError, MailboxError
+          rescue DeadActorError
           end
         end
 
@@ -118,6 +133,13 @@ module Celluloid
       end
     rescue Timeout::Error
       Logger.error("Couldn't cleanly terminate all actors in #{shutdown_timeout} seconds!")
+      # TODO: cleanup all threads
+      actors.each do |actor|
+        begin
+          Actor.kill(actor)
+        rescue DeadActorError, MailboxError
+        end
+      end
     end
   end
 
@@ -204,7 +226,7 @@ module Celluloid
         mailbox.class
       end
     end
-    
+
     def proxy_class(klass = nil)
       if klass
         @proxy_class = klass
@@ -326,6 +348,8 @@ module Celluloid
     end
 
     def inspect
+      return "..." if Celluloid.detect_recursion
+
       str = "#<"
 
       if leaked?
@@ -363,7 +387,7 @@ module Celluloid
 
   # Terminate this actor
   def terminate
-    Thread.current[:celluloid_actor].terminate
+    Thread.current[:celluloid_actor].proxy.terminate!
   end
 
   # Send a signal with the given name to all waiting methods
@@ -383,7 +407,7 @@ module Celluloid
 
   # Obtain the UUID of the current call chain
   def call_chain_id
-    Thread.current[:celluloid_chain_id]
+    CallChain.current_id
   end
 
   # Obtain the running tasks for this actor
@@ -446,6 +470,20 @@ module Celluloid
     end
   end
 
+  # Timeout on task suspension (eg Sync calls to other actors)
+  def timeout(duration)
+    bt = caller
+    task = Task.current
+    timer = after(duration) do
+      exception = Task::TimeoutError.new
+      exception.set_backtrace bt
+      task.resume exception
+    end
+    yield
+  ensure
+    timer.cancel if timer
+  end
+
   # Run given block in an exclusive mode: all synchronous calls block the whole
   # actor, not only current message processing.
   def exclusive(&block)
@@ -491,6 +529,7 @@ end
 require 'celluloid/version'
 
 require 'celluloid/calls'
+require 'celluloid/call_chain'
 require 'celluloid/condition'
 require 'celluloid/thread'
 require 'celluloid/core_ext'

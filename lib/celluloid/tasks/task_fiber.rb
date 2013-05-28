@@ -1,11 +1,13 @@
 module Celluloid
-  class FiberStackError < StandardError; end
+  class FiberStackError < Celluloid::Error; end
 
   # Tasks with a Fiber backend
   class TaskFiber < Task
 
     def create
       @fiber = Fiber.new do
+        # FIXME: cannot use the writer as specs run inside normal Threads
+        Thread.current[:celluloid_role] = :actor
         yield
       end
     end
