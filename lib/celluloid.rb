@@ -59,7 +59,7 @@ module Celluloid
       return unless task
 
       chain_id = CallChain.current_id
-      actor.tasks.any? { |t| t != task && t.chain_id == chain_id }
+      actor.tasks.to_a.any? { |t| t != task && t.chain_id == chain_id }
     end
 
     # Define an exception handler for actor crashes
@@ -137,7 +137,7 @@ module Celluloid
       actors.each do |actor|
         begin
           Actor.kill(actor)
-        rescue DeadActorError, MailboxError
+        rescue DeadActorError, MailboxDead
         end
       end
     end
@@ -487,13 +487,13 @@ module Celluloid
   # Run given block in an exclusive mode: all synchronous calls block the whole
   # actor, not only current message processing.
   def exclusive(&block)
-    Thread.current[:celluloid_actor].exclusive(&block)
+    Thread.current[:celluloid_task].exclusive(&block)
   end
 
   # Are we currently exclusive
   def exclusive?
-    actor = Thread.current[:celluloid_actor]
-    actor && actor.exclusive?
+    task = Thread.current[:celluloid_task]
+    task && task.exclusive?
   end
 
   # Call a block after a given interval, returning a Celluloid::Timer object
@@ -549,6 +549,7 @@ require 'celluloid/signals'
 require 'celluloid/stack_dump'
 require 'celluloid/system_events'
 require 'celluloid/tasks'
+require 'celluloid/task_set'
 require 'celluloid/thread_handle'
 require 'celluloid/uuid'
 

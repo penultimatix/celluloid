@@ -24,14 +24,17 @@ module Celluloid
       Task.current.suspend(status)
     end
 
-    attr_reader :type, :status
-    attr_accessor :chain_id, :name
+    attr_reader :type, :meta, :status
+    attr_accessor :chain_id
 
     # Create a new task
-    def initialize(type)
+    def initialize(type, meta)
       @type     = type
-      @name     = nil
+      @meta     = meta
       @status   = :new
+
+      @exclusive         = false
+      @dangerous_suspend = @meta ? @meta.delete(:dangerous_suspend) : false
 
       actor     = Thread.current[:celluloid_actor]
       @chain_id = CallChain.current_id
@@ -63,7 +66,14 @@ module Celluloid
 
     # Suspend the current task, changing the status to the given argument
     def suspend(status)
+      raise "Cannot suspend while in exclusive mode" if exclusive?
+
       @status = status
+
+      if @dangerous_suspend
+        Logger.warn "Dangerously suspending task: type=#{@type.inspect}, meta=#{@meta.inspect}, status=#{@status.inspect}"
+      end
+
       value = signal
 
       raise value if value.is_a?(Celluloid::ResumableError)
@@ -78,14 +88,35 @@ module Celluloid
       nil
     end
 
+    # Execute a code block in exclusive mode.
+    def exclusive
+      if @exclusive
+        yield
+      else
+        begin
+          @exclusive = true
+          yield
+        ensure
+          @exclusive = false
+        end
+      end
+    end
+
     # Terminate this task
     def terminate
+      raise "Cannot terminate an exclusive task" if exclusive?
+
       if running?
-        Celluloid.logger.warn "Terminating task: type=#{@type.inspect}, status=#{@status.inspect}"
+        Celluloid.logger.warn "Terminating task: type=#{@type.inspect}, meta=#{@meta.inspect}, status=#{@status.inspect}"
         resume Task::TerminatedError.new("task was terminated")
       else
         raise DeadTaskError, "task is already dead"
       end
+    end
+
+    # Is this task running in exclusive mode?
+    def exclusive?
+      @exclusive
     end
 
     def backtrace
@@ -96,35 +127,7 @@ module Celluloid
 
     # Nicer string inspect for tasks
     def inspect
-      "#<#{self.class}:0x#{object_id.to_s(16)} @type=#{@type.inspect}, @status=#{@status.inspect}>"
-    end
-  end
-
-  class TaskSet
-    include Enumerable
-
-    def initialize
-      @tasks = Set.new
-    end
-
-    def <<(task)
-      @tasks += [task]
-    end
-
-    def delete(task)
-      @tasks -= [task]
-    end
-
-    def each(&blk)
-      @tasks.each(&blk)
-    end
-
-    def first
-      @tasks.first
-    end
-
-    def empty?
-      @tasks.empty?
+      "#<#{self.class}:0x#{object_id.to_s(16)} @type=#{@type.inspect}, @meta=#{@meta.inspect}, @status=#{@status.inspect}>"
     end
   end
 end

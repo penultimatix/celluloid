@@ -27,7 +27,7 @@ module Celluloid
   # normal Ruby objects wrapped in threads which communicate with asynchronous
   # messages.
   class Actor
-    attr_reader :subject, :proxy, :tasks, :links, :mailbox, :thread, :name, :locals
+    attr_reader :subject, :proxy, :tasks, :links, :mailbox, :thread, :name
 
     class << self
       extend Forwardable
@@ -148,7 +148,6 @@ module Celluloid
       @running   = true
       @exclusive = false
       @name      = nil
-      @locals    = {}
 
       @thread = ThreadHandle.new(:actor) do
         setup_thread
@@ -191,28 +190,9 @@ module Celluloid
       @running = false
     end
 
-    # Is this actor running in exclusive mode?
-    def exclusive?
-      @exclusive
-    end
-
-    # Execute a code block in exclusive mode.
-    def exclusive
-      if @exclusive
-        yield
-      else
-        begin
-          @exclusive = true
-          yield
-        ensure
-          @exclusive = false
-        end
-      end
-    end
-
     # Perform a linking request with another actor
     def linking_request(receiver, type)
-      exclusive do
+      Celluloid.exclusive do
         start_time = Time.now
         receiver.mailbox << LinkingRequest.new(Actor.current, type)
         system_events = []
@@ -312,15 +292,17 @@ module Celluloid
       when SystemEvent
         handle_system_event message
       when Call
-        task(:call, message.method) {
-          if @receiver_block_executions && meth = message.method
-            if meth == :__send__
-              meth = message.arguments.first
-            end
-            if @receiver_block_executions.include?(meth.to_sym)
-              message.execute_block_on_receiver
-            end
+        meth = message.method
+        if meth == :__send__
+          meth = message.arguments.first
+        end
+        if @receiver_block_executions && meth
+          if @receiver_block_executions.include?(meth.to_sym)
+            message.execute_block_on_receiver
           end
+        end
+
+        task(:call, :method_name => meth, :dangerous_suspend => meth == :initialize) {
           message.dispatch(@subject)
         }
       when BlockCall
@@ -328,7 +310,9 @@ module Celluloid
       when BlockResponse, Response
         message.dispatch
       else
-        @receivers.handle_message(message)
+        unless @receivers.handle_message(message)
+          Logger.debug "Discarded message (unhandled): #{message}"
+        end
       end
       message
     end
@@ -337,7 +321,7 @@ module Celluloid
     def handle_system_event(event)
       case event
       when ExitEvent
-        task(:exit_handler, @exit_handler) { handle_exit_event event }
+        task(:exit_handler, :method_name => @exit_handler) { handle_exit_event event }
       when LinkingRequest
         event.process(links)
       when NamingRequest
@@ -380,17 +364,9 @@ module Celluloid
 
     # Run the user-defined finalizer, if one is set
     def run_finalizer
-      # FIXME: remove before Celluloid 1.0
-      if @subject.respond_to?(:finalize) && @subject.class.finalizer != :finalize
-        Logger.warn("DEPRECATION WARNING: #{@subject.class}#finalize is deprecated and will be removed in Celluloid 1.0. " +
-          "Define finalizers with '#{@subject.class}.finalizer :callback.'")
-
-        task(:finalizer, :finalize) { @subject.finalize }
-      end
-
       finalizer = @subject.class.finalizer
       if finalizer && @subject.respond_to?(finalizer, true)
-        task(:finalizer, :finalize) { @subject.__send__(finalizer) }
+        task(:finalizer, :method_name => finalizer, :dangerous_suspend => true) { @subject.__send__(finalizer) }
       end
     rescue => ex
       Logger.crash("#{@subject.class}#finalize crashed!", ex)
@@ -405,18 +381,21 @@ module Celluloid
         end
       end
 
-      tasks.each { |task| task.terminate }
+      tasks.to_a.each { |task| task.terminate }
     rescue => ex
       Logger.crash("#{@subject.class}: CLEANUP CRASHED!", ex)
     end
 
     # Run a method inside a task unless it's exclusive
-    def task(task_type, method_name = nil, &block)
-      if @exclusives && (@exclusives == :all || (method_name && @exclusives.include?(method_name.to_sym)))
-        exclusive { block.call }
-      else
-        @task_class.new(task_type, &block).resume
-      end
+    def task(task_type, meta = nil)
+      method_name = meta && meta.fetch(:method_name, nil)
+      @task_class.new(task_type, meta) {
+        if @exclusives && (@exclusives == :all || (method_name && @exclusives.include?(method_name.to_sym)))
+          Celluloid.exclusive { yield }
+        else
+          yield
+        end
+      }.resume
     end
   end
 end

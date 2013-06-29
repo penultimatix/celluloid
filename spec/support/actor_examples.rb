@@ -133,9 +133,47 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
     actor.respond_to?(:zomg_private, true).should be_true
   end
 
+  it "warns about suspending the initialize" do
+    klass = Class.new do
+      include included_module
+      task_class task_klass
+
+      def initialize
+        sleep 0.1
+      end
+    end
+
+    Celluloid.logger = mock.as_null_object
+    Celluloid.logger.should_receive(:warn).with("Dangerously suspending task: type=:call, meta={:method_name=>:initialize}, status=:sleeping")
+
+    actor = klass.new
+    actor.terminate
+    Celluloid::Actor.join(actor)
+  end
+
   it "calls the user defined finalizer" do
     actor = actor_class.new "Mr. Bean"
     actor.wrapped_object.should_receive(:my_finalizer)
+    actor.terminate
+    Celluloid::Actor.join(actor)
+  end
+
+  it "warns about suspending the finalizer" do
+    klass = Class.new do
+      include included_module
+      task_class task_klass
+
+      finalizer :cleanup
+
+      def cleanup
+        sleep 0.1
+      end
+    end
+
+    Celluloid.logger = mock.as_null_object
+    Celluloid.logger.should_receive(:warn).with("Dangerously suspending task: type=:finalizer, meta={:method_name=>:cleanup}, status=:sleeping")
+
+    actor = klass.new
     actor.terminate
     Celluloid::Actor.join(actor)
   end
@@ -370,7 +408,7 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
 
     it "logs a warning when terminating tasks" do
       Celluloid.logger = mock.as_null_object
-      Celluloid.logger.should_receive(:warn).with("Terminating task: type=:call, status=:sleeping")
+      Celluloid.logger.should_receive(:warn).with("Terminating task: type=:call, meta={:method_name=>:sleepy}, status=:sleeping")
 
       actor = actor_class.new "Arnold Schwarzenegger"
       actor.async.sleepy 10
@@ -390,41 +428,6 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
       expect do
         Celluloid.current_actor
       end.to raise_exception(Celluloid::NotActorError)
-    end
-  end
-
-  context "thread locals" do
-    let(:example_class) do
-      Class.new do
-        include included_module
-        task_class task_klass
-
-        def initialize(value)
-          Thread.current[:example_thread_local] = value
-        end
-
-        def value
-          Thread.current[:example_thread_local]
-        end
-
-        def deferred_value
-          defer do
-            Thread.current[:example_thread_local]
-          end
-        end
-      end
-    end
-
-    let(:example_value) { "foobar" }
-
-    it "preserves thread locals between tasks" do
-      actor = example_class.new(example_value)
-      actor.value.should eq example_value
-    end
-
-    it "isolates thread locals in defer blocks" do
-      actor = example_class.new(example_value)
-      actor.deferred_value.should eq nil
     end
   end
 
@@ -985,6 +988,17 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
       a2 = actor_class.new
 
       a1.ask_name_with_timeout(a2, 0.6).should == :foo
+    end
+  end
+
+  context "raw message sends" do
+    it "logs on unhandled messages" do
+      Celluloid.logger = mock.as_null_object
+      Celluloid.logger.should_receive(:debug).with("Discarded message (unhandled): first")
+
+      actor = actor_class.new "Irma Gladden"
+      actor.mailbox << :first
+      sleep Celluloid::TIMER_QUANTUM
     end
   end
 end

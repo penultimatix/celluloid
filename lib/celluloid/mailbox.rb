@@ -95,6 +95,8 @@ module Celluloid
 
     # Shut down this mailbox and clean up its contents
     def shutdown
+      raise MailboxDead, "mailbox already shutdown" if @dead
+
       @mutex.lock
       begin
         yield if block_given?
@@ -105,7 +107,10 @@ module Celluloid
         @mutex.unlock rescue nil
       end
 
-      messages.each { |msg| msg.cleanup if msg.respond_to? :cleanup }
+      messages.each do |msg|
+        dead_letter msg
+        msg.cleanup if msg.respond_to? :cleanup
+      end
       true
     end
 
@@ -137,7 +142,7 @@ module Celluloid
     private
 
     def dead_letter(message)
-      Logger.debug "Discarded message: #{message}"
+      Logger.debug "Discarded message (mailbox is dead): #{message}"
     end
 
     def mailbox_full
