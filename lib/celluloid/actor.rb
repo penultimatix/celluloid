@@ -77,8 +77,8 @@ module Celluloid
       # Obtain all running actors in the system
       def all
         actors = []
-        Thread.list.each do |t|
-          next unless t.celluloid? && t.role == :actor
+        Celluloid.internal_pool.each do |t|
+          next unless t.role == :actor
           actors << t.actor.proxy if t.actor && t.actor.respond_to?(:proxy)
         end
         actors
@@ -121,7 +121,7 @@ module Celluloid
       # Forcibly kill a given actor
       def kill(actor)
         actor.thread.kill
-        actor.mailbox.shutdown
+        actor.mailbox.shutdown if actor.mailbox.alive?
       end
 
       # Wait for an actor to terminate
@@ -133,12 +133,15 @@ module Celluloid
 
     # Wrap the given subject with an Actor
     def initialize(subject, options = {})
-      @subject      = subject
-      @mailbox      = options[:mailbox] || Mailbox.new
+      @subject = subject
+
+      @mailbox          = options.fetch(:mailbox_class, Mailbox).new
+      @mailbox.max_size = options.fetch(:mailbox_size, nil)
+
+      @task_class   = options[:task_class] || Celluloid.task_class
       @exit_handler = options[:exit_handler]
       @exclusives   = options[:exclusive_methods]
       @receiver_block_executions = options[:receiver_block_executions]
-      @task_class   = options[:task_class] || Celluloid.task_class
 
       @tasks     = TaskSet.new
       @links     = Links.new

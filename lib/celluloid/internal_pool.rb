@@ -3,34 +3,76 @@ require 'thread'
 module Celluloid
   # Maintain a thread pool FOR SPEED!!
   class InternalPool
-    attr_accessor :busy_size, :idle_size, :max_idle
+    attr_accessor :max_idle
 
     def initialize
-      @pool = []
+      @group = ThreadGroup.new
       @mutex = Mutex.new
-      @busy_size = @idle_size = 0
+      @threads = []
 
-      reset
-    end
-
-    def reset
       # TODO: should really adjust this based on usage
       @max_idle = 16
+      @running = true
+    end
+
+    def busy_size
+      @threads.select(&:busy).size
+    end
+
+    def idle_size
+      @threads.reject(&:busy).size
+    end
+
+    def assert_running
+      unless running?
+        raise Error, "Thread pool is not running"
+      end
+    end
+
+    def assert_inactive
+      if active?
+        message = "Thread pool is still active"
+        if defined?(JRUBY_VERSION)
+          Celluloid.logger.warn message
+        else
+          raise Error, message
+        end
+      end
+    end
+
+    def running?
+      @running
+    end
+
+    def active?
+      to_a.any?
+    end
+
+    def each
+      @threads.each do |thread|
+        yield thread
+      end
+    end
+
+    def to_a
+      @threads
     end
 
     # Get a thread from the pool, running the given block
     def get(&block)
       @mutex.synchronize do
+        assert_running
+
         begin
-          if @pool.empty?
+          idle = @threads.reject(&:busy)
+          if idle.empty?
             thread = create
           else
-            thread = @pool.shift
-            @idle_size -= 1
+            thread = idle.first
           end
         end until thread.status # handle crashed threads
 
-        @busy_size += 1
+        thread.busy = true
         thread[:celluloid_queue] << block
         thread
       end
@@ -39,13 +81,12 @@ module Celluloid
     # Return a thread to the pool
     def put(thread)
       @mutex.synchronize do
-        if @pool.size >= @max_idle
+        thread.busy = false
+        if idle_size >= @max_idle
           thread[:celluloid_queue] << nil
+          @threads.delete(thread)
         else
           clean_thread_locals(thread)
-          @pool << thread
-          @idle_size += 1
-          @busy_size -= 1
         end
       end
     end
@@ -66,6 +107,8 @@ module Celluloid
       end
 
       thread[:celluloid_queue] = queue
+      @threads << thread
+      @group.add(thread)
       thread
     end
 
@@ -81,13 +124,27 @@ module Celluloid
 
     def shutdown
       @mutex.synchronize do
-        @max_idle = 0
-        @pool.each do |thread|
+        finalize
+        @threads.each do |thread|
           thread[:celluloid_queue] << nil
         end
       end
     end
-  end
 
-  self.internal_pool = InternalPool.new
+    def kill
+      @mutex.synchronize do
+        finalize
+        @running = false
+
+        @threads.shift.kill until @threads.empty?
+        @group.list.each(&:kill)
+      end
+    end
+
+    private
+
+    def finalize
+      @max_idle = 0
+    end
+  end
 end

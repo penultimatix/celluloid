@@ -34,6 +34,11 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
     actor.object_id.should_not eq(Kernel.object_id)
   end
 
+  it "implements respond_to? correctly" do
+    actor = actor_class.new 'Troy McClure'
+    actor.should respond_to(:alive?)
+  end
+
   it "supports synchronous calls" do
     actor = actor_class.new "Troy McClure"
     actor.greet.should eq("Hi, I'm Troy McClure")
@@ -143,12 +148,12 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
       end
     end
 
-    Celluloid.logger = mock.as_null_object
-    Celluloid.logger.should_receive(:warn).with("Dangerously suspending task: type=:call, meta={:method_name=>:initialize}, status=:sleeping")
+    Celluloid.logger = double.as_null_object
+    Celluloid.logger.should_receive(:warn).with(/Dangerously suspending task: type=:call, meta={:method_name=>:initialize}, status=:sleeping/)
 
     actor = klass.new
     actor.terminate
-    Celluloid::Actor.join(actor)
+    Celluloid::Actor.join(actor) unless defined?(JRUBY_VERSION)
   end
 
   it "calls the user defined finalizer" do
@@ -170,8 +175,8 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
       end
     end
 
-    Celluloid.logger = mock.as_null_object
-    Celluloid.logger.should_receive(:warn).with("Dangerously suspending task: type=:finalizer, meta={:method_name=>:cleanup}, status=:sleeping")
+    Celluloid.logger = double.as_null_object
+    Celluloid.logger.should_receive(:warn).with(/Dangerously suspending task: type=:finalizer, meta={:method_name=>:cleanup}, status=:sleeping/)
 
     actor = klass.new
     actor.terminate
@@ -328,6 +333,8 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
       actor = actor_class.new "James Dean"
       actor.crash rescue nil
 
+      sleep 0.1 # hax to prevent a race between exit handling and the next call
+
       expect do
         actor.greet
       end.to raise_exception(Celluloid::DeadActorError)
@@ -407,7 +414,7 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
     end
 
     it "logs a warning when terminating tasks" do
-      Celluloid.logger = mock.as_null_object
+      Celluloid.logger = double.as_null_object
       Celluloid.logger.should_receive(:warn).with("Terminating task: type=:call, meta={:method_name=>:sleepy}, status=:sleeping")
 
       actor = actor_class.new "Arnold Schwarzenegger"
@@ -901,12 +908,12 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
     end
   end
 
-  context :mailbox_limit do
+  context :mailbox_size do
     subject do
       Class.new do
         include included_module
         task_class task_klass
-        mailbox.max_size = 100
+        mailbox_size 100
       end
     end
 
@@ -993,7 +1000,7 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
 
   context "raw message sends" do
     it "logs on unhandled messages" do
-      Celluloid.logger = mock.as_null_object
+      Celluloid.logger = double.as_null_object
       Celluloid.logger.should_receive(:debug).with("Discarded message (unhandled): first")
 
       actor = actor_class.new "Irma Gladden"
