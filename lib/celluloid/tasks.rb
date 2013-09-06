@@ -25,7 +25,7 @@ module Celluloid
     end
 
     attr_reader :type, :meta, :status
-    attr_accessor :chain_id
+    attr_accessor :chain_id, :guard_warnings
 
     # Create a new task
     def initialize(type, meta)
@@ -35,11 +35,13 @@ module Celluloid
 
       @exclusive         = false
       @dangerous_suspend = @meta ? @meta.delete(:dangerous_suspend) : false
+      @guard_warnings    = false
 
       actor     = Thread.current[:celluloid_actor]
       @chain_id = CallChain.current_id
 
       raise NotActorError, "can't create tasks outside of actors" unless actor
+      guard "can't create tasks inside of tasks" if Thread.current[:celluloid_task]
 
       create do
         begin
@@ -67,6 +69,7 @@ module Celluloid
     # Suspend the current task, changing the status to the given argument
     def suspend(status)
       raise "Cannot suspend while in exclusive mode" if exclusive?
+      raise "Cannot suspend a task from outside of itself" unless Task.current == self
 
       @status = status
 
@@ -91,6 +94,7 @@ module Celluloid
 
     # Resume a suspended task, giving it a value to return if needed
     def resume(value = nil)
+      guard "Cannot resume a task from inside of a task" if Thread.current[:celluloid_task]
       deliver(value)
       nil
     end
@@ -137,6 +141,14 @@ module Celluloid
     # Nicer string inspect for tasks
     def inspect
       "#<#{self.class}:0x#{object_id.to_s(16)} @type=#{@type.inspect}, @meta=#{@meta.inspect}, @status=#{@status.inspect}>"
+    end
+
+    def guard(message)
+      if @guard_warnings
+        Logger.warn message if $CELLULOID_DEBUG
+      else
+        raise message if $CELLULOID_DEBUG
+      end
     end
   end
 end

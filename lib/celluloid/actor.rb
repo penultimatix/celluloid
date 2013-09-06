@@ -268,6 +268,19 @@ module Celluloid
       @timers.every(interval) { task(:timer, &block) }
     end
 
+    def timeout(duration)
+      bt = caller
+      task = Task.current
+      timer = @timers.after(duration) do
+        exception = Task::TimeoutError.new("execution expired")
+        exception.set_backtrace bt
+        task.resume exception
+      end
+      yield
+    ensure
+      timer.cancel if timer
+    end
+
     class Sleeper
       def initialize(timers, interval)
         @timers = timers
@@ -314,7 +327,7 @@ module Celluloid
         message.dispatch
       else
         unless @receivers.handle_message(message)
-          Logger.debug "Discarded message (unhandled): #{message}"
+          Logger.debug "Discarded message (unhandled): #{message}" if $CELLULOID_DEBUG
         end
       end
       message
@@ -368,11 +381,15 @@ module Celluloid
     # Run the user-defined finalizer, if one is set
     def run_finalizer
       finalizer = @subject.class.finalizer
-      if finalizer && @subject.respond_to?(finalizer, true)
-        task(:finalizer, :method_name => finalizer, :dangerous_suspend => true) { @subject.__send__(finalizer) }
+      return unless finalizer && @subject.respond_to?(finalizer, true)
+
+      task(:finalizer, :method_name => finalizer, :dangerous_suspend => true) do
+        begin
+          @subject.__send__(finalizer)
+        rescue => ex
+          Logger.crash("#{@subject.class}#finalize crashed!", ex)
+        end
       end
-    rescue => ex
-      Logger.crash("#{@subject.class}#finalize crashed!", ex)
     end
 
     # Clean up after this actor

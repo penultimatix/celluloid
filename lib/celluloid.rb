@@ -8,7 +8,7 @@ if defined?(JRUBY_VERSION) && JRUBY_VERSION == "1.7.3"
 end
 
 module Celluloid
-  VERSION = '0.15.0.pre'
+  VERSION = '0.15.0'
   Error = Class.new StandardError
 
   extend self # expose all instance methods as singleton methods
@@ -416,16 +416,9 @@ module Celluloid
 
   # Timeout on task suspension (eg Sync calls to other actors)
   def timeout(duration)
-    bt = caller
-    task = Task.current
-    timer = after(duration) do
-      exception = Task::TimeoutError.new
-      exception.set_backtrace bt
-      task.resume exception
+    Thread.current[:celluloid_actor].timeout(duration) do
+      yield
     end
-    yield
-  ensure
-    timer.cancel if timer
   end
 
   # Run given block in an exclusive mode: all synchronous calls block the whole
