@@ -3,12 +3,8 @@ require 'thread'
 require 'timeout'
 require 'set'
 
-if defined?(JRUBY_VERSION) && JRUBY_VERSION == "1.7.3"
-  raise "Celluloid is broken on JRuby 1.7.3. Please upgrade to 1.7.4+"
-end
-
 module Celluloid
-  VERSION = '0.15.0'
+  VERSION = '0.16.0.pre'
   Error = Class.new StandardError
 
   extend self # expose all instance methods as singleton methods
@@ -463,6 +459,10 @@ module Celluloid
   end
 end
 
+if defined?(JRUBY_VERSION) && JRUBY_VERSION == "1.7.3"
+  raise "Celluloid is broken on JRuby 1.7.3. Please upgrade to 1.7.4+"
+end
+
 require 'celluloid/calls'
 require 'celluloid/call_chain'
 require 'celluloid/condition'
@@ -505,6 +505,8 @@ require 'celluloid/notifications'
 require 'celluloid/logging'
 
 require 'celluloid/legacy' unless defined?(CELLULOID_FUTURE)
+
+$CELLULOID_MONITORING = false
 
 # Configure default systemwide settings
 Celluloid.task_class = Celluloid::TaskFiber
