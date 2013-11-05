@@ -58,7 +58,7 @@ module Celluloid
     # Start the group
     def initialize(registry = nil)
       @members = []
-      @registry = registry || Registry.root
+      @registry = registry || Celluloid.actor_system.registry
 
       yield current_actor if block_given?
     end
@@ -81,11 +81,15 @@ module Celluloid
     def add(klass, options)
       member = Member.new(@registry, klass, options)
       @members << member
-      member
+      member.actor
     end
 
     def actors
       @members.map(&:actor)
+    end
+
+    def [](actor_name)
+      @registry[actor_name]
     end
 
     finalizer :finalize
@@ -102,7 +106,12 @@ module Celluloid
       end
       raise "a group member went missing. This shouldn't be!" unless member
 
-      member.restart(reason)
+      if reason
+        member.restart
+      else
+        member.cleanup
+        @members.delete(member)
+      end
     end
 
     # A member of the group
@@ -137,20 +146,21 @@ module Celluloid
         @registry[@name] = @actor if @name
       end
 
-      def restart(reason)
+      def restart
         @actor = nil
-        @registry.delete(@name) if @name
-
-        # Ignore supervisors that shut down cleanly
-        return unless reason
+        cleanup
 
         start
       end
 
       def terminate
-        @registry.delete(@name) if @name
+        cleanup
         @actor.terminate if @actor
       rescue DeadActorError
+      end
+
+      def cleanup
+        @registry.delete(@name) if @name
       end
     end
   end

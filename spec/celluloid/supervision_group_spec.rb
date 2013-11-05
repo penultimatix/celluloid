@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-describe Celluloid::SupervisionGroup do
+describe Celluloid::SupervisionGroup, actor_system: :global do
   before :all do
     class MyActor
       include Celluloid
@@ -54,6 +54,12 @@ describe Celluloid::SupervisionGroup do
       Celluloid::Actor[:example_pool].should be_running
       Celluloid::Actor[:example_pool].args.should eq ['foo']
       Celluloid::Actor[:example_pool].size.should be 3
+    end
+
+    it "allows external access to the internal registry" do
+      supervisor = MyGroup.run!
+
+      supervisor[:example].should be_a MyActor
     end
   end
 end
