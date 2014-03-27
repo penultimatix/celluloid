@@ -161,7 +161,6 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
       end
     end
 
-    Celluloid.logger = double.as_null_object
     Celluloid.logger.should_receive(:warn).with(/Dangerously suspending task: type=:call, meta={:method_name=>:initialize}, status=:sleeping/)
 
     actor = klass.new
@@ -188,7 +187,6 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
       end
     end
 
-    Celluloid.logger = double.as_null_object
     Celluloid.logger.should_receive(:warn).with(/Dangerously suspending task: type=:finalizer, meta={:method_name=>:cleanup}, status=:sleeping/)
 
     actor = klass.new
@@ -313,27 +311,27 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
     end
 
     it "includes both sender and receiver in exception traces" do
-      ExampleReceiver = Class.new do
+      example_receiver = Class.new do
         include included_module
         task_class task_klass
 
-        def receiver_method
+        define_method(:receiver_method) do
           raise ExampleCrash, "the spec purposely crashed me :("
         end
       end
 
-      ExampleCaller = Class.new do
+      excample_caller = Class.new do
         include included_module
         task_class task_klass
 
-        def sender_method
-          ExampleReceiver.new.receiver_method
+        define_method(:sender_method) do
+          example_receiver.new.receiver_method
         end
       end
 
       ex = nil
       begin
-        ExampleCaller.new.sender_method
+        excample_caller.new.sender_method
       rescue => ex
       end
 
@@ -417,6 +415,15 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
       end.to raise_exception(Celluloid::DeadActorError)
     end
 
+    it "terminates cleanly on Celluloid shutdown" do
+      Celluloid::Actor.stub(:kill).and_call_original
+
+      actor = actor_class.new "Arnold Schwarzenegger"
+
+      Celluloid.shutdown
+      Celluloid::Actor.should_not have_received(:kill)
+    end
+
     it "raises the right DeadActorError if terminate! called after terminated" do
       actor = actor_class.new "Arnold Schwarzenegger"
       actor.terminate
@@ -427,7 +434,6 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
     end
 
     it "logs a warning when terminating tasks" do
-      Celluloid.logger = double.as_null_object
       Celluloid.logger.should_receive(:warn).with(/^Terminating task: type=:call, meta={:method_name=>:sleepy}, status=:sleeping\n/)
 
       actor = actor_class.new "Arnold Schwarzenegger"
@@ -1013,7 +1019,6 @@ shared_examples "Celluloid::Actor examples" do |included_module, task_klass|
 
   context "raw message sends" do
     it "logs on unhandled messages" do
-      Celluloid.logger = double.as_null_object
       Celluloid.logger.should_receive(:debug).with("Discarded message (unhandled): first")
 
       actor = actor_class.new "Irma Gladden"

@@ -58,10 +58,11 @@ module Celluloid
 
           unless message
             if timeout
+              # TODO: use hitimes/timers instead of Time.now
               now = Time.now
               wait_until ||= now + timeout
               wait_interval = wait_until - now
-              return if wait_interval <= 0
+              raise(TimeoutError, "mailbox timeout exceeded", nil) if wait_interval <= 0
             else
               wait_interval = nil
             end
@@ -74,23 +75,6 @@ module Celluloid
       ensure
         @mutex.unlock rescue nil
       end
-    end
-
-    # Retrieve the next message in the mailbox
-    def next_message
-      message = nil
-
-      if block_given?
-        index = @messages.index do |msg|
-          yield(msg) || msg.is_a?(SystemEvent)
-        end
-
-        message = @messages.slice!(index, 1).first if index
-      else
-        message = @messages.shift
-      end
-
-      message
     end
 
     # Shut down this mailbox and clean up its contents
@@ -140,6 +124,23 @@ module Celluloid
     end
 
     private
+
+    # Retrieve the next message in the mailbox
+    def next_message
+      message = nil
+
+      if block_given?
+        index = @messages.index do |msg|
+          yield(msg) || msg.is_a?(SystemEvent)
+        end
+
+        message = @messages.slice!(index, 1).first if index
+      else
+        message = @messages.shift
+      end
+
+      message
+    end
 
     def dead_letter(message)
       Logger.debug "Discarded message (mailbox is dead): #{message}" if $CELLULOID_DEBUG

@@ -1,4 +1,9 @@
 shared_context "a Celluloid Mailbox" do
+  after do
+    Celluloid.logger.stub(:debug)
+    subject.shutdown if subject.alive?
+  end
+
   it "receives messages" do
     message = :ohai
 
@@ -34,7 +39,10 @@ shared_context "a Celluloid Mailbox" do
     interval = 0.1
     started_at = Time.now
 
-    subject.receive(interval) { false }
+    expect do
+      subject.receive(interval) { false }
+    end.to raise_exception(Celluloid::TimeoutError)
+
     (Time.now - started_at).should be_within(Celluloid::TIMER_QUANTUM).of interval
   end
 
@@ -55,7 +63,6 @@ shared_context "a Celluloid Mailbox" do
   end
 
   it "logs discarded messages" do
-    Celluloid.logger = double.as_null_object
     Celluloid.logger.should_receive(:debug).with("Discarded message (mailbox is dead): third")
 
     subject.max_size = 2
@@ -65,7 +72,6 @@ shared_context "a Celluloid Mailbox" do
   end
 
   it "discard messages when dead" do
-    Celluloid.logger = double.as_null_object
     Celluloid.logger.should_receive(:debug).with("Discarded message (mailbox is dead): first")
     Celluloid.logger.should_receive(:debug).with("Discarded message (mailbox is dead): second")
     Celluloid.logger.should_receive(:debug).with("Discarded message (mailbox is dead): third")

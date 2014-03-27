@@ -1,3 +1,10 @@
+HEAD
+----
+* Obtain actor names via Celluloid::Actor.registered_name and
+  #registered_name to avoid conflicts with the built-in Ruby
+  Class.name method
+* Update to timers 2.0.0
+
 0.15.0 (2013-09-04)
 -------------------
 * Remove legacy support for "bang"-method based async invocation

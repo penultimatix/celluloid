@@ -5,6 +5,7 @@ module Celluloid
     trap_exit :restart_actor
 
     class << self
+
       # Actors or sub-applications to be supervised
       def blocks
         @blocks ||= []
@@ -55,6 +56,8 @@ module Celluloid
       end
     end
 
+    finalizer :finalize
+
     # Start the group
     def initialize(registry = nil)
       @members = []
@@ -90,13 +93,6 @@ module Celluloid
 
     def [](actor_name)
       @registry[actor_name]
-    end
-
-    finalizer :finalize
-
-    # Terminate the group
-    def finalize
-      @members.reverse_each(&:terminate) if @members
     end
 
     # Restart a crashed actor
@@ -162,6 +158,12 @@ module Celluloid
       def cleanup
         @registry.delete(@name) if @name
       end
+    end
+
+    private
+
+    def finalize
+      @members.reverse_each(&:terminate) if @members
     end
   end
 end
