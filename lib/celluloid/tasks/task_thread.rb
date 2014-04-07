@@ -46,8 +46,9 @@ module Celluloid
       raise DeadTaskError, "cannot resume a dead task"
     end
 
-    def backtrace
-      @thread.backtrace
-    end
+    #de backtrace
+    #de def backtrace
+    #de   @thread.backtrace
+    #de end
   end
 end
