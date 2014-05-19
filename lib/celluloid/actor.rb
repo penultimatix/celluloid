@@ -189,10 +189,10 @@ module Celluloid
             return
           elsif message.instance_of? NilClass
             raise TimeoutError, "linking timeout of #{LINKING_TIMEOUT} seconds exceeded"
-          elsif message.instance_of? SystemEvent
+          elsif message.is_a? SystemEvent
             # Queue up pending system events to be processed after we've successfully linked
             system_events << message
-          else raise 'wtf'
+          else raise "Unexpected message type: #{message.class}. Expected LinkingResponse, NilClass, SystemEvent."
           end
         end
       end
