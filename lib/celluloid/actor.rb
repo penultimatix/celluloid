@@ -363,5 +363,22 @@ module Celluloid
         end
       }.resume
     end
+
+    #de backtrace
+    
+    def backtrace
+      if task = active_task
+        task.caller_backtrace
+      else
+        @thread.backtrace if @thread
+      end
+    end
+
+    def active_task
+      @tasks.to_a.find do |task|
+        task.status == :running
+      end
+    end
+
   end
 end
