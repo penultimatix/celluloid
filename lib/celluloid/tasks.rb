@@ -152,4 +152,3 @@ end
 
 require 'celluloid/tasks/task_fiber'
 require 'celluloid/tasks/task_thread'
-require 'celluloid/tasks/task_pooled_fiber'
