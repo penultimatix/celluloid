@@ -185,10 +185,3 @@ module Celluloid
     end
   end
 end
-<<<<<<< HEAD
-
-require 'celluloid/tasks/task_fiber'
-require 'celluloid/tasks/task_thread'
-require 'celluloid/tasks/task_pooled_fiber'
-=======
->>>>>>> 40cbbb3f8472d35883739e3fe152f84a7ab3beed
