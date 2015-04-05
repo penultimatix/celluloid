@@ -49,6 +49,10 @@ module Celluloid
         if worker.alive?
           @idle << worker
           @busy.delete worker
+
+          # Broadcast that worker is done processing and
+          # waiting idle
+          signal :worker_idle
         end
       end
     end
@@ -131,8 +135,26 @@ module Celluloid
       signal :respawn_complete
     end
 
-    def respond_to?(method, include_private = false)
-      super || @worker_class.instance_methods.include?(method.to_sym)
+    def respond_to?(meth, include_private = false)
+      # NOTE: use method() here since this class
+      # shouldn't be used directly, and method() is less
+      # likely to be "reimplemented" inconsistently
+      # with other Object.*method* methods.
+
+      found = method(meth)
+      if include_private
+        found ? true : false
+      else
+        if found.is_a?(UnboundMethod)
+          found.owner.public_instance_methods.include?(meth) ||
+            found.owner.protected_instance_methods.include?(meth)
+        else
+          found.receiver.public_methods.include?(meth) ||
+            found.receiver.protected_methods.include?(meth)
+        end
+      end
+    rescue NameError
+      false
     end
 
     def method_missing(method, *args, &block)
@@ -141,6 +163,15 @@ module Celluloid
       else
         super
       end
+    end
+
+    # Since PoolManager allocates worker objects only just before calling them,
+    # we can still help Celluloid::Call detect passing invalid parameters to
+    # async methods by checking for those methods on the worker class
+    def method(meth)
+      super
+    rescue NameError
+      @worker_class.instance_method(meth.to_sym)
     end
   end
 end
