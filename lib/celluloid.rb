@@ -3,11 +3,13 @@ require 'thread'
 require 'timeout'
 require 'set'
 
+$CELLULOID_DEBUG = false
+
+require 'celluloid/version'
+
 module Celluloid
   # Expose all instance methods as singleton methods
   extend self
-
-  VERSION = '0.16.0.pre'
 
   # Linking times out after 5 seconds
   LINKING_TIMEOUT = 5
@@ -18,6 +20,8 @@ module Celluloid
   class << self
     attr_writer   :actor_system     # Default Actor System
     attr_accessor :logger           # Thread-safe logger class
+    attr_accessor :log_actor_crashes
+    attr_accessor :group_class      # Default internal thread group to use
     attr_accessor :task_class       # Default task type to use
     attr_accessor :shutdown_timeout # How long actors have to terminate
 
@@ -38,6 +42,7 @@ module Celluloid
       klass.property :mailbox_class, :default => Celluloid::Mailbox
       klass.property :proxy_class,   :default => Celluloid::CellProxy
       klass.property :task_class,    :default => Celluloid.task_class
+      klass.property :group_class,   :default => Celluloid.group_class
       klass.property :mailbox_size
 
       klass.property :exclusive_actor, :default => false
@@ -135,7 +140,8 @@ module Celluloid
     end
 
     def register_shutdown
-      return if @shutdown_registered
+      return if defined?(@shutdown_registered) && @shutdown_registered
+
       # Terminate all actors at exit
       at_exit do
         if defined?(RUBY_ENGINE) && RUBY_ENGINE == "ruby" && RUBY_VERSION >= "1.9"
@@ -239,7 +245,7 @@ module Celluloid
     end
 
     def ===(other)
-      other.kind_of? self
+      other.is_a? self
     end
   end
 
@@ -464,7 +470,11 @@ require 'celluloid/core_ext'
 require 'celluloid/cpu_counter'
 require 'celluloid/fiber'
 require 'celluloid/fsm'
-require 'celluloid/internal_pool'
+
+require 'celluloid/group'
+require 'celluloid/groups/pool'
+require 'celluloid/groups/proactor'
+
 require 'celluloid/links'
 require 'celluloid/logger'
 require 'celluloid/mailbox'
@@ -478,7 +488,11 @@ require 'celluloid/responses'
 require 'celluloid/signals'
 require 'celluloid/stack_dump'
 require 'celluloid/system_events'
+
 require 'celluloid/tasks'
+require 'celluloid/tasks/fibered'
+require 'celluloid/tasks/threaded'
+
 require 'celluloid/task_set'
 require 'celluloid/thread_handle'
 require 'celluloid/uuid'
@@ -506,11 +520,25 @@ require 'celluloid/legacy' unless defined?(CELLULOID_FUTURE)
 $CELLULOID_MONITORING = false
 
 # Configure default systemwide settings
-Celluloid.task_class = Celluloid::TaskFiber
-Celluloid.logger     = Logger.new(STDERR)
-Celluloid.shutdown_timeout = 10
 
-unless $CELLULOID_TEST
+
+Celluloid.task_class = begin
+  Celluloid.const_get(ENV['CLLLD_TASK_CLASS'] || fail(TypeError))
+rescue
+  Celluloid::Task::Fibered
+end
+
+Celluloid.group_class = begin
+  Celluloid::Group.const_get(ENV['CLLLD_GROUP_CLASS'] || fail(TypeError))
+rescue
+  Celluloid::Group::Proactor
+end
+
+Celluloid.logger = Logger.new(STDERR)
+Celluloid.shutdown_timeout = 10
+Celluloid.log_actor_crashes = true
+
+unless defined?($CELLULOID_TEST) && $CELLULOID_TEST
   Celluloid.register_shutdown
   Celluloid.init
 end
