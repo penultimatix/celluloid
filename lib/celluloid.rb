@@ -473,7 +473,7 @@ require 'celluloid/fsm'
 
 require 'celluloid/group'
 require 'celluloid/groups/pool'
-require 'celluloid/groups/proactor'
+require 'celluloid/groups/spawner'
 
 require 'celluloid/links'
 require 'celluloid/logger'
@@ -531,7 +531,7 @@ end
 Celluloid.group_class = begin
   Celluloid::Group.const_get(ENV['CLLLD_GROUP_CLASS'] || fail(TypeError))
 rescue
-  Celluloid::Group::Proactor
+  Celluloid::Group::Spawner
 end
 
 Celluloid.logger = Logger.new(STDERR)
