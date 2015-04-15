@@ -38,7 +38,7 @@ module Celluloid
       @guard_warnings    = false
 
       actor     = Thread.current[:celluloid_actor]
-      @chain_id = CallChain.current_id
+      @chain_id = Internals::CallChain.current_id
 
       raise NotActorError, "can't create tasks outside of actors" unless actor
       guard "can't create tasks inside of tasks" if Thread.current[:celluloid_task]
@@ -55,7 +55,7 @@ module Celluloid
           name_current_thread thread_metadata
 
           Thread.current[:celluloid_task] = self
-          CallChain.current_id = @chain_id
+          Internals::CallChain.current_id = @chain_id
 
           actor.tasks << self
           yield
@@ -81,7 +81,7 @@ module Celluloid
       @status = status
 
       if $CELLULOID_DEBUG && @dangerous_suspend
-        Logger.with_backtrace(caller[2...8]) do |logger|
+        Internals::Logger.with_backtrace(caller[2...8]) do |logger|
           logger.warn "Dangerously suspending task: type=#{@type.inspect}, meta=#{@meta.inspect}, status=#{@status.inspect}"
         end
       end
@@ -129,7 +129,7 @@ module Celluloid
       raise "Cannot terminate an exclusive task" if exclusive?
 
       if running?
-        Logger.with_backtrace(backtrace) do |logger|
+        Internals::Logger.with_backtrace(backtrace) do |logger|
           logger.debug "Terminating task: type=#{@type.inspect}, meta=#{@meta.inspect}, status=#{@status.inspect}"
         end
         exception = Task::TerminatedError.new("task was terminated")
@@ -159,7 +159,7 @@ module Celluloid
 
     def guard(message)
       if @guard_warnings
-        Logger.warn message if $CELLULOID_DEBUG
+        Internals::Logger.warn message if $CELLULOID_DEBUG
       else
         raise message if $CELLULOID_DEBUG
       end
