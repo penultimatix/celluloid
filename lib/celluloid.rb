@@ -37,10 +37,10 @@ module Celluloid
       klass.send :extend,  ClassMethods
       klass.send :include, InstanceMethods
 
-      klass.send :extend, Properties
+      klass.send :extend, Internals::Properties
 
       klass.property :mailbox_class, :default => Celluloid::Mailbox
-      klass.property :proxy_class,   :default => Celluloid::CellProxy
+      klass.property :proxy_class,   :default => Celluloid::Proxy::Cell
       klass.property :task_class,    :default => Celluloid.task_class
       klass.property :group_class,   :default => Celluloid.group_class
       klass.property :mailbox_size
@@ -79,12 +79,12 @@ module Celluloid
 
     # Generate a Universally Unique Identifier
     def uuid
-      UUID.generate
+      Internals::UUID.generate
     end
 
     # Obtain the number of CPUs in the system
     def cores
-     CPUCounter.cores
+     Internals::CPUCounter.cores
     end
     alias_method :cpus, :cores
     alias_method :ncpus, :cores
@@ -103,13 +103,13 @@ module Celluloid
       task = Thread.current[:celluloid_task]
       return unless task
 
-      chain_id = CallChain.current_id
+      chain_id = Internals::CallChain.current_id
       actor.tasks.to_a.any? { |t| t != task && t.chain_id == chain_id }
     end
 
     # Define an exception handler for actor crashes
     def exception_handler(&block)
-      Logger.exception_handler(&block)
+      Internals::Logger.exception_handler(&block)
     end
 
     def suspend(status, waiter)
@@ -187,18 +187,6 @@ module Celluloid
       proxy
     end
     alias_method :spawn_link, :new_link
-
-    # Create a supervisor which ensures an instance of an actor will restart
-    # an actor if it fails
-    def supervise(*args, &block)
-      Supervisor.supervise(self, *args, &block)
-    end
-
-    # Create a supervisor which ensures an instance of an actor will restart
-    # an actor if it fails, and keep the actor registered under a given name
-    def supervise_as(name, *args, &block)
-      Supervisor.supervise_as(name, self, *args, &block)
-    end
 
     # Run an actor in the foreground
     def run(*args, &block)
@@ -278,7 +266,7 @@ module Celluloid
       if leaked?
         str << Celluloid::BARE_OBJECT_WARNING_MESSAGE
       else
-        str << "Celluloid::CellProxy"
+        str << "Celluloid::Proxy::Cell"
       end
 
       str << "(#{self.class}:0x#{object_id.to_s(16)})"
@@ -330,7 +318,7 @@ module Celluloid
 
   # Obtain the UUID of the current call chain
   def call_chain_id
-    CallChain.current_id
+    Internals::CallChain.current_id
   end
 
   # Obtain the running tasks for this actor
@@ -449,71 +437,39 @@ end
 require 'celluloid/exceptions'
 
 require 'celluloid/calls'
-require 'celluloid/call_chain'
 require 'celluloid/condition'
 require 'celluloid/thread'
-require 'celluloid/core_ext'
 
+require 'celluloid/core_ext'
 require 'celluloid/internals'
 
-require 'celluloid/group'
-require 'celluloid/group/pool'
-require 'celluloid/group/spawner'
-
-require 'celluloid/task'
-require 'celluloid/task/fibered'
-require 'celluloid/task/threaded'
-
-=begin
-require 'celluloid/core_ext'
-require 'celluloid/cpu_counter'
-require 'celluloid/fiber'
-require 'celluloid/fsm'
-
-require 'celluloid/group'
-require 'celluloid/group/pool'
-require 'celluloid/group/spawner'
-
-require 'celluloid/links'
-require 'celluloid/logger'
-
-require 'celluloid/mailbox'
-require 'celluloid/evented_mailbox'
-require 'celluloid/method'
-require 'celluloid/properties'
-
-require 'celluloid/handlers'
-require 'celluloid/receivers'
-require 'celluloid/registry'
-require 'celluloid/responses'
-require 'celluloid/signals'
-require 'celluloid/stack_dump'
 require 'celluloid/system_events'
 
+require 'celluloid/mailbox'
+require 'celluloid/mailbox/evented'
+
+require 'celluloid/group'
+require 'celluloid/group/spawner'   
+require 'celluloid/group/pool'      # TODO: Find way to only load this if being used.
+
 require 'celluloid/task'
 require 'celluloid/task/fibered'
-require 'celluloid/task/threaded'
+require 'celluloid/task/threaded'   # TODO: Find way to only load this if being used.
 
-require 'celluloid/task_set'
-require 'celluloid/thread_handle'
-require 'celluloid/uuid'
-=end
-
-require 'celluloid/proxies/abstract_proxy'
-require 'celluloid/proxies/sync_proxy'
-require 'celluloid/proxies/cell_proxy'
-require 'celluloid/proxies/actor_proxy'
-require 'celluloid/proxies/async_proxy'
-require 'celluloid/proxies/future_proxy'
-require 'celluloid/proxies/block_proxy'
+require 'celluloid/proxies'
 
 require 'celluloid/actor'
 require 'celluloid/cell'
 require 'celluloid/future'
-require 'celluloid/actor_system'
-require 'celluloid/supervision'
-require 'celluloid/notifications'
 
+require 'celluloid/actor_system'
+
+# TODO: Remove unneeded gem requirements once the gems are well known.
+require 'celluloid/supervision'
+require 'celluloid/pool'
+require 'celluloid/fsm'
+
+require 'celluloid/notifications'
 require 'celluloid/logging'
 
 require 'celluloid/legacy' unless defined?(CELLULOID_FUTURE)

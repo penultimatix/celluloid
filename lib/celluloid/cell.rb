@@ -33,15 +33,15 @@ module Celluloid
       @actor.handle(Call) do |message|
         invoke(message)
       end
-      @actor.handle(BlockCall) do |message|
+      @actor.handle(Call::Block) do |message|
         task(:invoke_block) { message.dispatch }
       end
-      @actor.handle(BlockResponse, Response) do |message|
+      @actor.handle(Internals::Response::Block, Internals::Response) do |message|
         message.dispatch
       end
 
       @actor.start
-      @proxy = (options[:proxy_class] || CellProxy).new(@actor.proxy, @actor.mailbox, @subject.class.to_s)
+      @proxy = (options[:proxy_class] || Proxy::Cell).new(@actor.proxy, @actor.mailbox, @subject.class.to_s)
     end
     attr_reader :proxy, :subject
 
@@ -81,7 +81,7 @@ module Celluloid
         begin
           @subject.__send__(@finalizer)
         rescue => ex
-          Logger.crash("#{@subject.class} finalizer crashed!", ex)
+          Internals::Logger.crash("#{@subject.class} finalizer crashed!", ex)
         end
       end
     end
