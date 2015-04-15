@@ -25,7 +25,9 @@ module Celluloid
 
       if @mailbox == ::Thread.current[:celluloid_mailbox]
         args.unshift meth
-        meth = :__send__
+        actor = Thread.current[:celluloid_actor]
+        actor = actor.behavior.subject.bare_object
+        return actor.__send__(*args, &block)
       end
 
       call = SyncCall.new(::Celluloid.mailbox, meth, args, block)

@@ -200,20 +200,6 @@ module Celluloid
       Supervisor.supervise_as(name, self, *args, &block)
     end
 
-    # Create a new pool of workers. Accepts the following options:
-    #
-    # * size: how many workers to create. Default is worker per CPU core
-    # * args: array of arguments to pass when creating a worker
-    #
-    def pool(options = {})
-      PoolManager.new(self, options)
-    end
-
-    # Same as pool, but links to the pool manager
-    def pool_link(options = {})
-      PoolManager.new_link(self, options)
-    end
-
     # Run an actor in the foreground
     def run(*args, &block)
       Actor.join(new(*args, &block))
@@ -437,7 +423,7 @@ module Celluloid
   end
 
   # Perform a blocking or computationally intensive action inside an
-  # asynchronous thread pool, allowing the sender to continue processing other
+  # asynchronous group of threads, allowing the sender to continue processing other
   # messages in its mailbox in the meantime
   def defer(&block)
     # This implementation relies on the present implementation of
@@ -467,20 +453,35 @@ require 'celluloid/call_chain'
 require 'celluloid/condition'
 require 'celluloid/thread'
 require 'celluloid/core_ext'
+
+require 'celluloid/internals'
+
+require 'celluloid/group'
+require 'celluloid/group/pool'
+require 'celluloid/group/spawner'
+
+require 'celluloid/task'
+require 'celluloid/task/fibered'
+require 'celluloid/task/threaded'
+
+=begin
+require 'celluloid/core_ext'
 require 'celluloid/cpu_counter'
 require 'celluloid/fiber'
 require 'celluloid/fsm'
 
 require 'celluloid/group'
-require 'celluloid/groups/pool'
-require 'celluloid/groups/spawner'
+require 'celluloid/group/pool'
+require 'celluloid/group/spawner'
 
 require 'celluloid/links'
 require 'celluloid/logger'
+
 require 'celluloid/mailbox'
 require 'celluloid/evented_mailbox'
 require 'celluloid/method'
 require 'celluloid/properties'
+
 require 'celluloid/handlers'
 require 'celluloid/receivers'
 require 'celluloid/registry'
@@ -489,13 +490,14 @@ require 'celluloid/signals'
 require 'celluloid/stack_dump'
 require 'celluloid/system_events'
 
-require 'celluloid/tasks'
-require 'celluloid/tasks/fibered'
-require 'celluloid/tasks/threaded'
+require 'celluloid/task'
+require 'celluloid/task/fibered'
+require 'celluloid/task/threaded'
 
 require 'celluloid/task_set'
 require 'celluloid/thread_handle'
 require 'celluloid/uuid'
+=end
 
 require 'celluloid/proxies/abstract_proxy'
 require 'celluloid/proxies/sync_proxy'
@@ -509,10 +511,9 @@ require 'celluloid/actor'
 require 'celluloid/cell'
 require 'celluloid/future'
 require 'celluloid/actor_system'
-require 'celluloid/pool_manager'
-require 'celluloid/supervision_group'
-require 'celluloid/supervisor'
+require 'celluloid/supervision'
 require 'celluloid/notifications'
+
 require 'celluloid/logging'
 
 require 'celluloid/legacy' unless defined?(CELLULOID_FUTURE)
@@ -521,15 +522,14 @@ $CELLULOID_MONITORING = false
 
 # Configure default systemwide settings
 
-
 Celluloid.task_class = begin
-  Celluloid.const_get(ENV['CLLLD_TASK_CLASS'] || fail(TypeError))
+  Celluloid.const_get(ENV['CELLULOID_TASK_CLASS'] || fail(TypeError))
 rescue
   Celluloid::Task::Fibered
 end
 
 Celluloid.group_class = begin
-  Celluloid::Group.const_get(ENV['CLLLD_GROUP_CLASS'] || fail(TypeError))
+  Celluloid::Group.const_get(ENV['CELLULOID_GROUP_CLASS'] || fail(TypeError))
 rescue
   Celluloid::Group::Spawner
 end

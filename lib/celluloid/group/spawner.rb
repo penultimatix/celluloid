@@ -8,11 +8,8 @@ module Celluloid
 
       attr_accessor :finalizer
 
-      def initialize(options={})
+      def initialize
         super
-        @finalizer = options.fetch(:finalizer, Proc.new { |thread|
-          thread.keys.each { |key| thread[key] = nil }
-        })
       end
 
       def get(&block)
@@ -21,17 +18,28 @@ module Celluloid
         instantiate block
       end
 
-      def each
-        threads = []
-        @mutex.synchronize { threads = @group.dup }
-        threads.each { |thread| yield thread }
-      end
-
       def shutdown
         @running = false
         @mutex.synchronize {
-          @group.shift.kill until @group.empty?
+          queue = Queue.new
+          loop do
+            break if @group.empty?
+            th = @group.shift
+            th.kill
+            queue << th
+          end
+
+          loop do
+            break if queue.empty?
+            queue.pop.join
+          end
         }
+      end
+
+      # Temporarily for backward compatibility for specs
+      # (should be replaced with busy?() or something)
+      def busy_size
+        @mutex.synchronize { @group.count(&:status)}
       end
 
       private
@@ -40,13 +48,10 @@ module Celluloid
         thread = Thread.new {
           begin
             proc.call
-          rescue => ex
+          rescue Exception => ex
             Logger.crash("thread crashed", ex)
-          ensure
-            @finalizer.call Thread.current
           end
         }
-
         @mutex.synchronize { @group << thread }
         thread
       end
