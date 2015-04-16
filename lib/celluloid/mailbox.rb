@@ -15,7 +15,10 @@ module Celluloid
 
     def initialize
       @address   = Celluloid.uuid
+
+      # TODO: use a Queue + Timeout.timeout{} instead?
       @messages  = []
+
       @mutex     = Mutex.new
       @dead      = false
       @condition = ConditionVariable.new
@@ -27,14 +30,20 @@ module Celluloid
       @mutex.lock
       begin
         if mailbox_full || @dead
+          # Signal anyway - in case the condmutex is waiting
+          # (especially if it's full, we want messages to get processed)
+          @condition.signal
+
           dead_letter(message)
           return
         end
+
         if message.is_a?(SystemEvent)
           # SystemEvents are high priority messages so they get added to the
           # head of our message queue instead of the end
           @messages.unshift message
         else
+          fail "NIL messages not allowed!" if message.nil?
           @messages << message
         end
 
@@ -48,31 +57,20 @@ module Celluloid
     # Receive a message from the Mailbox. May return nil and may return before
     # the specified timeout.
     def check(timeout = nil, &block)
-      message = nil
-
       @mutex.lock
       begin
         raise MailboxDead, "attempted to receive from a dead mailbox" if @dead
-
-        Timers::Wait.for(timeout) do |remaining|
-          message = next_message(&block)
-
-          break message if message
-
-          @condition.wait(@mutex, remaining)
-        end
+        wait_for_message(timeout, &block)
       ensure
         @mutex.unlock rescue nil
       end
-
-      return message
     end
 
     # Receive a letter from the mailbox. Guaranteed to return a message. If
     # timeout is exceeded, raise a TimeoutError.
     def receive(timeout = nil, &block)
       Timers::Wait.for(timeout) do |remaining|
-        if message = check(timeout, &block)
+        if message = check(remaining, &block)
           return message
         end
       end
@@ -82,14 +80,17 @@ module Celluloid
 
     # Shut down this mailbox and clean up its contents
     def shutdown
-      raise MailboxDead, "mailbox already shutdown" if @dead
-
+      messages = []
       @mutex.lock
+      raise MailboxDead, "mailbox already shutdown" if @dead
       begin
         yield if block_given?
         messages = @messages
         @messages = []
         @dead = true
+
+        # let the condmutex timeout if we acquired this lock during it's wait()
+        @condition.signal
       ensure
         @mutex.unlock rescue nil
       end
@@ -103,7 +104,7 @@ module Celluloid
 
     # Is the mailbox alive?
     def alive?
-      !@dead
+      @mutex.synchronize { !@dead }
     end
 
     # Cast to an array
@@ -146,11 +147,28 @@ module Celluloid
     end
 
     def dead_letter(message)
-      Internals::Logger.debug "Discarded message (mailbox is dead): #{message}" if $CELLULOID_DEBUG
+      Logger.debug "Discarded message (mailbox is dead): #{message}" if $CELLULOID_DEBUG
     end
 
     def mailbox_full
       @max_size && @messages.size >= @max_size
+    end
+
+    def wait_for_message(timeout, &block)
+      Timers::Wait.for(timeout) do |remaining|
+        # TODO: there should be a "peek" method
+        message = next_message(&block)
+        return message if message
+
+        # Try and wait for next message
+        @condition.wait(@mutex, remaining)
+        return nil if @dead
+
+        # Avoid timing out if there are message present
+        # (we don't know if the
+        message = next_message(&block)
+        return message if message
+      end
     end
   end
 end
