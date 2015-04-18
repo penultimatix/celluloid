@@ -1,5 +1,4 @@
 source 'https://rubygems.org'
-gemspec development_group: :gem_build_tools
 
 gem 'coveralls', require: false
 
@@ -9,6 +8,9 @@ gem 'timers', github: 'celluloid/timers'
 gem 'celluloid-supervision', github: 'celluloid/celluloid-supervision', branch: "master"
 gem 'celluloid-pool', github: 'celluloid/celluloid-pool', branch: "master"
 gem 'celluloid-fsm', github: 'celluloid/celluloid-fsm', branch: "master"
+gem 'celluloid-extras', github: 'celluloid/celluloid-extras', branch: "master"
+
+gemspec development_group: :gem_build_tools
 
 group :development do
   gem 'pry'
