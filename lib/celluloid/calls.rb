@@ -4,6 +4,7 @@ module Celluloid
     attr_reader :method, :arguments, :block
 
     def initialize(method, arguments = [], block = nil)
+      @retry = 0
       @method, @arguments = method, arguments
       if block
         if Celluloid.exclusive?
@@ -24,6 +25,14 @@ module Celluloid
       check(obj)
       _b = @block && @block.to_proc
       obj.public_send(@method, *@arguments, &_b)
+=begin
+    rescue Celluloid::TimeoutError => ex
+      raise ex unless ( @retry += 1 ) <= RETRY_CALL_LIMIT
+      puts "retrying"
+      Internals::Logger.warn("TimeoutError at Call dispatch. Retrying in #{RETRY_CALL_WAIT} seconds. ( Attempt #{@retry} of #{RETRY_CALL_LIMIT} )")
+      sleep RETRY_CALL_WAIT
+      retry
+=end
     end
 
     def check(obj)

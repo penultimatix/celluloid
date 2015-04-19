@@ -6,7 +6,8 @@ module Celluloid
       @group = Celluloid.group_class.new
       @registry = Internals::Registry.new
     end
-    attr_reader :registry
+
+    attr_reader :registry, :group, :manager
 
     # Launch default services
     # FIXME: We should set up the supervision hierarchy here
@@ -14,6 +15,7 @@ module Celluloid
       within do
         Celluloid::Notifications::Fanout.supervise_as :notifications_fanout
         Celluloid::IncidentReporter.supervise_as :default_incident_reporter, STDERR
+        @manager = Group::Manager.supervise_as :group_manager, @group
       end
       true
     end
@@ -34,7 +36,11 @@ module Celluloid
     end
 
     def stack_dump
-      Internals::StackDump.new(@group)
+      Internals::Stack::Dump.new(@group)
+    end
+
+    def stack_summary
+      Internals::Stack::Summary.new(@group)
     end
 
     def_delegators "@registry", :[], :get, :[]=, :set, :delete
@@ -90,10 +96,12 @@ module Celluloid
       end
     rescue Timeout::Error
       Internals::Logger.error("Couldn't cleanly terminate all actors in #{shutdown_timeout} seconds!")
-      actors.each do |actor|
-        begin
-          Actor.kill(actor)
-        rescue DeadActorError, MailboxDead
+      unless RUBY_PLATFORM == "java" or RUBY_ENGINE == "rbx"
+        actors.each do |actor|
+          begin
+            Actor.kill(actor)
+          rescue DeadActorError, MailboxDead
+          end
         end
       end
     ensure

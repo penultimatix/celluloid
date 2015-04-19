@@ -19,6 +19,7 @@ end
 
 # Require in order, so both CELLULOID_TEST and CELLULOID_DEBUG are true
 require 'celluloid/test'
+require 'celluloid/essentials'
 
 module CelluloidSpecs
   def self.included_module
@@ -39,7 +40,7 @@ Specs.reset_probe(nil)
 
 Celluloid.shutdown_timeout = 1
 
-Dir['./spec/support/*.rb'].map {|f| require f }
+Dir['./spec/support/*.rb','./spec/shared/*.rb'].map {|f| require f }
 
 RSpec.configure do |config|
   unless Nenv.ci?

@@ -14,16 +14,21 @@ module Celluloid
   # Linking times out after 5 seconds
   LINKING_TIMEOUT = 5
 
+  # TODO: Do not hard-code. Allow configurable values.
+  RETRY_CALL_WAIT = 3
+  RETRY_CALL_LIMIT = 5
+
   # Warning message added to Celluloid objects accessed outside their actors
   BARE_OBJECT_WARNING_MESSAGE = "WARNING: BARE CELLULOID OBJECT "
 
   class << self
-    attr_writer   :actor_system     # Default Actor System
-    attr_accessor :logger           # Thread-safe logger class
+    attr_writer   :actor_system         # Default Actor System
+    attr_accessor :logger               # Thread-safe logger class
     attr_accessor :log_actor_crashes
-    attr_accessor :group_class      # Default internal thread group to use
-    attr_accessor :task_class       # Default task type to use
-    attr_accessor :shutdown_timeout # How long actors have to terminate
+    attr_accessor :group_class          # Default internal thread group to use
+    attr_accessor :task_class           # Default task type to use
+    attr_accessor :shutdown_timeout     # How long actors have to terminate
+    attr_reader   :group_manager
 
     def actor_system
       if Thread.current.celluloid?
@@ -31,6 +36,10 @@ module Celluloid
       else
         Thread.current[:celluloid_actor_system] || @actor_system or raise Error, "Celluloid is not yet started; use Celluloid.boot"
       end
+    end
+
+    def group_manager
+      actor_system.manager
     end
 
     def included(klass)
@@ -94,6 +103,12 @@ module Celluloid
       actor_system.stack_dump.print(output)
     end
     alias_method :dump, :stack_dump
+
+    # Perform a stack summary of all actors to the given output object
+    def stack_summary(output = STDERR)
+      actor_system.stack_summary.print(output)
+    end
+    alias_method :summarize, :stack_summary
 
     # Detect if a particular call is recursing through multiple actors
     def detect_recursion
@@ -441,22 +456,24 @@ require 'celluloid/condition'
 require 'celluloid/thread'
 
 require 'celluloid/core_ext'
-require 'celluloid/internals'
 
 require 'celluloid/system_events'
+
+require 'celluloid/proxies'
 
 require 'celluloid/mailbox'
 require 'celluloid/mailbox/evented'
 
+require 'celluloid/essentials'
+
 require 'celluloid/group'
-require 'celluloid/group/spawner'   
+require 'celluloid/group/manager'
+require 'celluloid/group/spawner'
 require 'celluloid/group/pool'      # TODO: Find way to only load this if being used.
 
 require 'celluloid/task'
 require 'celluloid/task/fibered'
 require 'celluloid/task/threaded'   # TODO: Find way to only load this if being used.
-
-require 'celluloid/proxies'
 
 require 'celluloid/actor'
 require 'celluloid/cell'
@@ -465,9 +482,6 @@ require 'celluloid/future'
 require 'celluloid/actor_system'
 
 require 'celluloid/depreciate'
-
-require 'celluloid/notifications'
-require 'celluloid/logging'
 
 require 'celluloid/legacy' unless defined?(CELLULOID_FUTURE)
 
