@@ -369,21 +369,21 @@ RSpec.describe Celluloid, actor_system: :global do
     end
 
     it "allows mocking raises" do
-      pending "not implemented?"
-      expect(actor).to receive(:foo).and_raise ArgumentError
-      expect { actor.foo }.to raise_error(ArgumentError)
+      expect(actor).to receive(:greet).and_raise ArgumentError
+      expect { actor.greet }.to raise_error(ArgumentError)
       expect(actor).to be_alive
     end
 
     it "allows mocking async calls via the async proxy" do
-      pending "not implemented?"
-      expect(actor.async).to receive(:foo).once
-      actor.async.foo
+      pending "Fails due to RSpec's new expectation verification"
+      fail "TODO: may never work in newer versions of RSpec (no method on Proxy::Async)"
+      expect(actor.async).to receive(:greet).once
+      actor.async.greet
     end
 
     it "allows mocking async calls via #async send" do
-      expect(actor).to receive(:async).once.with(:foo)
-      actor.async :foo
+      expect(actor).to receive(:async).once.with(:greet)
+      actor.async :greet
     end
   end
 
